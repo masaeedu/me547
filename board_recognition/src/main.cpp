@@ -1,5 +1,8 @@
 #include <stdio.h>
 #include <iostream>
+#include <ros/ros.h>
+#include <image_transport/image_transport.h>
+#include <cv_bridge/cv_bridge.h>
 #include "opencv2/core/core.hpp"
 #include "opencv2/features2d/features2d.hpp"
 #include "opencv2/highgui/highgui.hpp"
@@ -7,8 +10,6 @@
 #include "opencv2/nonfree/nonfree.hpp"
 
 using namespace cv;
-
-void readme();
 
 std::vector<KeyPoint> recognizeKeypoints(Mat image)
 {
@@ -71,6 +72,24 @@ std::vector<DMatch> filterGoodMatches(std::vector<DMatch> matches)
     return good_matches;
 }
 
+Point2f computeReferenceImageCoordinatesOfTile(int tile)
+{
+    int tileWidth = 19;
+    int offset = 14;
+
+    int col = tile % 10;
+    int row = (tile / 10) + 1;
+
+    if (row % 2 == 0)
+    {
+        return Point2f(198 - (offset + (col - 1) * tileWidth), 198 - (offset + (row - 1) * tileWidth));
+    }
+    else
+    {
+        return Point2f(offset + (col - 1) * tileWidth, 198 - (offset + (row - 1) * tileWidth));
+    }
+}
+
 void illustrateHomography(Mat img_object, Mat img_matches, Mat H)
 {
     //-- Get the corners from the image_1 ( the object to be "detected" )
@@ -79,7 +98,7 @@ void illustrateHomography(Mat img_object, Mat img_matches, Mat H)
     obj_corners[1] = cvPoint(img_object.cols, 0);
     obj_corners[2] = cvPoint(img_object.cols, img_object.rows);
     obj_corners[3] = cvPoint(0, img_object.rows);
-    obj_corners[4] = cvPoint(13, 184);
+    obj_corners[4] = computeReferenceImageCoordinatesOfTile(32);
     std::vector<Point2f> scene_corners(5);
 
     perspectiveTransform(obj_corners, scene_corners, H);
@@ -92,45 +111,27 @@ void illustrateHomography(Mat img_object, Mat img_matches, Mat H)
     circle(img_matches, scene_corners[4] + Point2f(img_object.cols, 0), 1, Scalar(0, 255, 0));
 
     //-- Show detected matches
-    imshow("Good Matches & Object detection", img_matches);
-
-    waitKey(0);
+    imshow("view", img_matches);
 }
 
-void readme()
+void imageRecognition(Mat img_object, Mat img_scene)
 {
-    std::cout << " Usage: ./SURF_descriptor <img1> <img2>" << std::endl;
-}
-
-int main(int argc, char **argv)
-{
-    // Read images
-    if (argc != 3)
-    {
-        readme();
-        return -1;
-    }
-
-    Mat img_object = imread(argv[1], CV_LOAD_IMAGE_GRAYSCALE);
-    Mat img_scene = imread(argv[2], CV_LOAD_IMAGE_GRAYSCALE);
-
-    if (!img_object.data || !img_scene.data)
-    {
-        std::cout << " --(!) Error reading images " << std::endl;
-        return -1;
-    }
-
     // Identify keypoints
-    std::vector<KeyPoint> keypoints_object, keypoints_scene;
-
-    keypoints_object = recognizeKeypoints(img_object);
-    keypoints_scene = recognizeKeypoints(img_scene);
+    std::vector<KeyPoint>
+        keypoints_object = recognizeKeypoints(img_object),
+        keypoints_scene = recognizeKeypoints(img_scene);
 
     // Match keypoints
     std::vector<DMatch> matches = matchKeypoints(img_object, keypoints_object, img_scene, keypoints_scene);
 
     // Filter to only close matches
     std::vector<DMatch> good_matches = filterGoodMatches(matches);
+
+    // Illustrate matches
+    Mat img_matches;
+    drawMatches(img_object, keypoints_object, img_scene, keypoints_scene,
+                good_matches, img_matches, Scalar::all(-1), Scalar::all(-1),
+                vector<char>(), DrawMatchesFlags::NOT_DRAW_SINGLE_POINTS);
 
     // Compute homography from well mapped keypoints
     std::vector<Point2f> obj;
@@ -145,14 +146,33 @@ int main(int argc, char **argv)
 
     Mat H = findHomography(obj, scene, CV_RANSAC);
 
-    // Illustrate matches
-    Mat img_matches;
-    drawMatches(img_object, keypoints_object, img_scene, keypoints_scene,
-                good_matches, img_matches, Scalar::all(-1), Scalar::all(-1),
-                vector<char>(), DrawMatchesFlags::NOT_DRAW_SINGLE_POINTS);
-
     // Illustrate homography
     illustrateHomography(img_object, img_matches, H);
+}
 
-    return 0;
+int main(int argc, char **argv)
+{
+    Mat img_object = imread("/home/me-547/Downloads/group7/board_reference_prepped.png", CV_LOAD_IMAGE_UNCHANGED);
+
+    auto imageCallback = [img_object](const sensor_msgs::ImageConstPtr& msg) {
+        try
+        {
+            imageRecognition(img_object, cv_bridge::toCvShare(msg, "bgr8")->image);
+            // cv::imshow("view", cv_bridge::toCvShare(msg, "bgr8")->image);
+            cv::waitKey(30);
+        }
+        catch (cv_bridge::Exception &e)
+        {
+            ROS_ERROR("Could not convert from '%s' to 'bgr8'.", msg->encoding.c_str());
+        }
+    };
+
+    ros::init(argc, argv, "image_listener");
+    ros::NodeHandle nh;
+    cv::namedWindow("view");
+    cv::startWindowThread();
+    image_transport::ImageTransport it(nh);
+    image_transport::Subscriber sub = it.subscribe("usb_cam/image_raw", 1, imageCallback);
+    ros::spin();
+    cv::destroyWindow("view");
 }
