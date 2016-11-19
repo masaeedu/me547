@@ -3,11 +3,9 @@
 #include <ros/ros.h>
 #include <image_transport/image_transport.h>
 #include <cv_bridge/cv_bridge.h>
-#include "opencv2/core/core.hpp"
-#include "opencv2/features2d/features2d.hpp"
-#include "opencv2/highgui/highgui.hpp"
-#include "opencv2/calib3d/calib3d.hpp"
+#include "opencv2/opencv.hpp"
 #include "opencv2/nonfree/nonfree.hpp"
+#include <serialConnectA255.h>
 
 using namespace cv;
 
@@ -90,6 +88,33 @@ Point2f computeReferenceImageCoordinatesOfTile(int tile)
     }
 }
 
+Point3f getWorldCoordinates(Point2f pixel)
+{
+    double f_i = 4.3;
+
+    double p_x, p_y;
+    p_x = p_y = 0.0081;
+
+    int img_width = 640;
+    int img_height = 480;
+
+    // Relative offset of camera surface origin
+    double a, b, c;
+    a = 545;
+    b = 92 - 15;
+    c = 990;
+
+    // Calculate surface coordinates from pixel values
+    double d, e, f;
+    d = (pixel.x - img_width / 2) * p_x * (f_i - c) / f_i;
+    e = (pixel.y - img_height / 2) * p_y * (f_i - c) / f_i;
+    f = c;
+
+    cout << d << " d, " << e << ", " << f << endl;
+
+    return Point3f(a - e, b - d, c - f);
+}
+
 void illustrateHomography(Mat img_object, Mat img_matches, Mat H)
 {
     //-- Get the corners from the image_1 ( the object to be "detected" )
@@ -98,7 +123,7 @@ void illustrateHomography(Mat img_object, Mat img_matches, Mat H)
     obj_corners[1] = cvPoint(img_object.cols, 0);
     obj_corners[2] = cvPoint(img_object.cols, img_object.rows);
     obj_corners[3] = cvPoint(0, img_object.rows);
-    obj_corners[4] = computeReferenceImageCoordinatesOfTile(32);
+    obj_corners[4] = computeReferenceImageCoordinatesOfTile(45);
     std::vector<Point2f> scene_corners(5);
 
     perspectiveTransform(obj_corners, scene_corners, H);
@@ -114,7 +139,7 @@ void illustrateHomography(Mat img_object, Mat img_matches, Mat H)
     imshow("view", img_matches);
 }
 
-void imageRecognition(Mat img_object, Mat img_scene)
+void imageRecognition(Mat img_object, Mat img_scene, serialConnectA255 &armController)
 {
     // Identify keypoints
     std::vector<KeyPoint>
@@ -146,28 +171,74 @@ void imageRecognition(Mat img_object, Mat img_scene)
 
     Mat H = findHomography(obj, scene, CV_RANSAC);
 
+    // Compute world coordinates and move robot to point
+    std::vector<Point2f> ref_pixel(1);
+    ref_pixel[0] = computeReferenceImageCoordinatesOfTile(45);
+
+    std::vector<Point2f> cam_pixel(1);
+    perspectiveTransform(ref_pixel, cam_pixel, H);
+
+    cout << cam_pixel[0].x << ", " << cam_pixel[0].y << endl;
+
+    Point3f wc = getWorldCoordinates(cam_pixel[0]);
+
+    cout << wc.x << ", " << wc.y << ", " << wc.z << endl;
+    double *DesTheta = new double[5];
+    DesTheta = armController.invKine(wc.x, wc.y, wc.z + 300, 45);
+    if (armController.moveTheta(20, DesTheta[0], DesTheta[1], DesTheta[2], DesTheta[3], DesTheta[4]) < 0)
+    {
+        ROS_ERROR("Unable to Run moveTheta");
+        return;
+    }
+
     // Illustrate homography
     illustrateHomography(img_object, img_matches, H);
 }
 
 int main(int argc, char **argv)
 {
-    Mat img_object = imread("/home/me-547/Downloads/group7/board_reference_prepped.png", CV_LOAD_IMAGE_UNCHANGED);
+    // Initialize ROS
+    ros::init(argc, argv, "image_listener");
 
-    auto imageCallback = [img_object](const sensor_msgs::ImageConstPtr& msg) {
-        try
+    // Set up serial connection with robot
+    serialConnectA255 armController;
+    if (armController.openPort() < 0)
+    {
+        ROS_INFO("Something went wrong in opening the serial port. Please see the messages above.");
+        return -1;
+    }
+    else
+    {
+        ROS_INFO("Port open successful");
+    }
+
+    if (armController.initialize() < 0)
+    {
+        ROS_ERROR("Initialization Failed");
+        return -1;
+    }
+
+    // Prepare callback for performing image recognition
+    bool done = false;
+    Mat img_object = imread("/home/me-547/Downloads/group7/board_reference_prepped.png", CV_LOAD_IMAGE_UNCHANGED);
+    auto imageCallback = [&done, img_object, &armController](const sensor_msgs::ImageConstPtr &msg) {
+        if (!done)
         {
-            imageRecognition(img_object, cv_bridge::toCvShare(msg, "bgr8")->image);
-            // cv::imshow("view", cv_bridge::toCvShare(msg, "bgr8")->image);
-            cv::waitKey(30);
-        }
-        catch (cv_bridge::Exception &e)
-        {
-            ROS_ERROR("Could not convert from '%s' to 'bgr8'.", msg->encoding.c_str());
+            done = true;
+            try
+            {
+                imageRecognition(img_object, cv_bridge::toCvShare(msg, "bgr8")->image, armController);
+                // cv::imshow("view", cv_bridge::toCvShare(msg, "bgr8")->image);
+                cv::waitKey(30);
+            }
+            catch (cv_bridge::Exception &e)
+            {
+                ROS_ERROR("Could not convert from '%s' to 'bgr8'.", msg->encoding.c_str());
+            }
         }
     };
 
-    ros::init(argc, argv, "image_listener");
+    // Listen for camera messages
     ros::NodeHandle nh;
     cv::namedWindow("view");
     cv::startWindowThread();
@@ -175,4 +246,13 @@ int main(int argc, char **argv)
     image_transport::Subscriber sub = it.subscribe("usb_cam/image_raw", 1, imageCallback);
     ros::spin();
     cv::destroyWindow("view");
+
+    // ros::init(argc, argv, "image_listener");
+    // ros::NodeHandle nh;
+    // cv::namedWindow("view");
+    // cv::startWindowThread();
+    // image_transport::ImageTransport it(nh);
+    // image_transport::Subscriber sub = it.subscribe("usb_cam/image_raw", 1, imageCallback);
+    // ros::spin();
+    // cv::destroyWindow("view");
 }
