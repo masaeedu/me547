@@ -1,5 +1,8 @@
 #include <stdlib.h>
 #include <game.h>
+#include <iostream>
+
+using namespace std;
 
 game::game()
 {
@@ -8,8 +11,11 @@ game::game()
 
 void game::next()
 {
-    tile = tile + (rand() % 6) + 1;
-
+    int diceroll=(rand() % 6) + 1;
+    tile = tile + diceroll;
+    cout << "========= Dice roll moved to tile: " << tile << endl;
+    
+    // Ladders
     if (tile == 2)
     {
         tile = 44;
@@ -42,7 +48,8 @@ void game::next()
     {
         tile = 100;
     }
-    //Snakes
+
+    // Snakes
     if (tile == 16)
     {
         tile = 5;
@@ -74,5 +81,9 @@ void game::next()
     else if (tile == 98)
     {
         tile = 78;
+    }
+    if (tile + diceroll > 100)
+    {
+        tile = 100;
     }
 }

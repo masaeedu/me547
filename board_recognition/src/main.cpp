@@ -8,6 +8,8 @@
 #include <serialConnectA255.h>
 #include <game.h>
 
+#define PI 3.14159265
+
 using namespace cv;
 
 std::vector<KeyPoint> recognizeKeypoints(Mat image)
@@ -79,7 +81,7 @@ Point2f computeReferenceImageCoordinatesOfTile(int tile)
     int tileWidth = 19;
     int offset = 14;
 
-    int col = (tile - 1) % 10; // Should return zero for all numbers that are factors of 10
+    int col = (tile - 1) % 10;       // Should return zero for all numbers that are factors of 10
     int row = ((tile - 1) / 10) + 1; // Should return 1 for all numbers <= 10, 2 for all numbers >10 <=20
 
     if (row % 2 == 0)
@@ -106,7 +108,7 @@ Point3f getWorldCoordinates(Point2f pixel)
     double a, b, c;
     a = 545;
     b = 92 - 15;
-    c = 990;
+    c = 923;
 
     // Calculate surface coordinates from pixel values
     double d, e, f;
@@ -199,13 +201,13 @@ int main(int argc, char **argv)
 
     if (armController.initialize() < 0)
     {
-        ROS_ERROR("Initialization Failed");
+        cerr << "Initialization Failed" << endl;
         return -1;
     }
 
     // Initialize game
     game game;
-    game.tile = 50;
+    game.tile = 1;
 
     // Prepare callback for performing image recognition
     bool done = false;
@@ -225,7 +227,7 @@ int main(int argc, char **argv)
             }
         }
 
-        // Compute world coordinates and move robot to point
+        // Compute world coordinates
         cout << "========= Moving to tile" << game.tile << endl;
         std::vector<Point2f> ref_pixel(1);
         ref_pixel[0] = computeReferenceImageCoordinatesOfTile(game.tile);
@@ -238,14 +240,22 @@ int main(int argc, char **argv)
         Point3f wc = getWorldCoordinates(cam_pixel[0]);
         cout << wc.x << ", " << wc.y << ", " << wc.z << endl;
 
+
+        // Move robot
+        int heightOffset = 330;
         armController.goReady();
 
-        double *DesTheta = new double[5];
-        DesTheta = armController.invKine(wc.x, wc.y, wc.z + 300, 0);
-        // if (armController.moveRobot(wc.x, wc.y, wc.z, 0, 0, 0))
-        if (armController.moveTheta(20, DesTheta[0], DesTheta[1], DesTheta[2], DesTheta[3], DesTheta[4]) < 0)
+        // double *DesTheta = new double[5];
+        // DesTheta = armController.invKine(wc.x, wc.y, wc.z + 300, 0);
+        int moveresult = armController.moveRobot(wc.x, wc.y, wc.z + heightOffset, 0, 90, 0);
+        if (moveresult < 0)
+        // if (armController.moveTheta(60, DesTheta[0], DesTheta[1], DesTheta[2], DesTheta[3], DesTheta[4]) < 0)
         {
-            ROS_ERROR("Unable to Run moveTheta");
+            cerr << "Unable to move to location" << endl;
+            if (moveresult == -2) {
+                cerr << "Destination location unreachable. Please adjust board" << endl;
+                waitKey(0);
+            }
             return;
         }
 
@@ -253,23 +263,26 @@ int main(int argc, char **argv)
         {
             if (armController.grip_open() < 0)
             {
-                ROS_ERROR("Unable to Open Grip");
+                cerr << "Unable to Open Grip" << endl;
                 return;
             }
         }
 
         armController.goInZ(-70);
+        // armController.moveRobot(wc.x, wc.y, wc.z + heightOffset - 70, 0, 90, 0);
 
         if (game.tile == 1)
         {
             if (armController.grip_close() < 0)
             {
-                ROS_ERROR("Unable to Close Grip");
+                cerr << "Unable to Close Grip" << endl;
                 return;
             }
         }
-        armController.goInZ(70);
 
+        armController.goInZ(70);
+        // armController.moveRobot(wc.x, wc.y, wc.z + heightOffset, 0, 90, 0);
+        
         game.next();
     };
 

@@ -71,11 +71,11 @@ int serialConnectA255::openPort()
         switch (errno)
         {
         case EACCES:
-            ROS_ERROR("You probably don't have premission to open the port for reading and writing.");
+            cerr << "You probably don't have premission to open the port for reading and writing." << endl;
             return -1;
             break;
         case ENOENT:
-            ROS_ERROR("The requested port does not exist. Is the IMU connected? Was the port name misspelled?");
+            cerr << "The requested port does not exist. Is the IMU connected? Was the port name misspelled?" << endl;
             return -1;
             break;
         }
@@ -129,7 +129,7 @@ int serialConnectA255::openPort()
     // Make sure queues are empty before we begin
     if (tcflush(fd_, TCIOFLUSH) != 0)
     {
-        ROS_ERROR("serialConnectA255::Exception, Tcflush failed. Please report this error if you see it.");
+        cerr << "serialConnectA255::Exception, Tcflush failed. Please report this error if you see it." << endl;
         return -1;
     }
 
@@ -149,7 +149,7 @@ int serialConnectA255::closePort()
         status = writeString("exit\r");
         if (status != 0)
         {
-            ROS_ERROR("Unable to send 'exit'");
+            cerr << "Unable to send 'exit'" << endl;
             return -1;
         }
         sleepms(100);
@@ -157,7 +157,7 @@ int serialConnectA255::closePort()
 
         if (status != 0)
         {
-            ROS_ERROR("Unable to send 'y'");
+            cerr << "Unable to send 'y'" << endl;
             return -1;
         }
         sleepms(100);
@@ -185,7 +185,7 @@ int serialConnectA255::initialize()
         status = writeString("ash test\r");
         if (status != 0)
         {
-            ROS_ERROR("Unable to enter 'ash test' mode.");
+            cerr << "Unable to enter 'ash test' mode." << endl;
             return -1;
         }
 
@@ -205,7 +205,7 @@ int serialConnectA255::initialize()
         status = readString(read);
         if (status != 0)
         {
-            ROS_ERROR("Unable to read 'robotver'");
+            cerr << "Unable to read 'robotver'" << endl;
             return -1;
         }
         read = read.substr(27, read.length() - 36);
@@ -228,7 +228,7 @@ int serialConnectA255::initialize()
     }
     catch (...)
     {
-        ROS_ERROR("Caught an unknown exception.");
+        cerr << "Caught an unknown exception." << endl;
         return -1;
     }
 }
@@ -245,7 +245,7 @@ int serialConnectA255::getArmPositionRW()
     status = writeString("here\r");
     if (status != 0)
     {
-        ROS_ERROR("Unable to send 'here'");
+        cerr << "Unable to send 'here'" << endl;
         return -1;
     }
     sleepms(100);
@@ -253,7 +253,7 @@ int serialConnectA255::getArmPositionRW()
     status = readString(read);
     if (status != 0)
     {
-        ROS_ERROR("Unable to read 'here'");
+        cerr << "Unable to read 'here'" << endl;
         return -1;
     }
     //std::cout << read << std::endl;
@@ -339,7 +339,7 @@ int serialConnectA255::getAngles()
     status = writeString("w2\r");
     if (status != 0)
     {
-        ROS_ERROR("Unable to send 'w2'");
+        cerr << "Unable to send 'w2'" << endl;
         return -1;
     }
     sleepms(100);
@@ -347,7 +347,7 @@ int serialConnectA255::getAngles()
     status = readString(readAng);
     if (status != 0)
     {
-        ROS_ERROR("Unable to read 'w2'");
+        cerr << "Unable to read 'w2'" << endl;
         return -1;
     }
     sleepms(200);
@@ -520,7 +520,7 @@ int serialConnectA255::moveTheta(double desSpeed, double finalTheta_1, double fi
     int status = writeString(tempSp);
     if (status != 0)
     {
-        ROS_ERROR("Unable to send desired speed command");
+        cerr << "Unable to send desired speed command" << endl;
         return -1;
     }
     sleepms(200);
@@ -583,10 +583,10 @@ int serialConnectA255::moveTheta(double desSpeed, double finalTheta_1, double fi
         status = writeString(tempStr);
         if (status != 0)
         {
-            ROS_ERROR("Unable to send joint command");
+            cerr << "Unable to send joint command" << endl;
             return -1;
         }
-        sleepms(8000);
+        sleepms(3000);
         tempStr = "";
     }
     // Get Current Arm Position
@@ -616,7 +616,7 @@ int serialConnectA255::moveRobot(double x, double y, double z, double z_rot, dou
     int status = writeString("here dummypoint\r");
     if (status != 0)
     {
-        ROS_ERROR("Unable to send 'here dummypoint'");
+        cerr << "Unable to send 'here dummypoint'" << endl;
         return -1;
     }
     sleepms(100);
@@ -625,25 +625,52 @@ int serialConnectA255::moveRobot(double x, double y, double z, double z_rot, dou
     string wShift;
     wShift = "wshift dummypoint,";
     wShift = wShift + setPrecision(offsetX, 3) + "," + setPrecision(offsetY, 3) + "," + setPrecision(offsetZ, 3) + "," + setPrecision(offsetZRot, 3) + "," + setPrecision(offsetYRot, 3) + "," + setPrecision(offsetXRot, 3) + "\r";
-    //std::cout << "string : " << wShift << "\n" ;
+    std::cout << "shifting dummypoint by : " << wShift << "\n" ;
     status = writeString(wShift);
     if (status != 0)
     {
-        ROS_ERROR("Unable to send wshift command");
+        cerr << "Unable to send wshift command" << endl;
         return -1;
     }
+    sleepms(100);
+
+    // Flush stdout
+    string read;
+    status = readString(read); 
     sleepms(100);
 
     // Send a move command
     status = writeString("moves dummypoint\r");
     if (status != 0)
     {
-        ROS_ERROR("Unable to send move command");
+        cerr << "Unable to send move command" << endl;
+        return -1;
+    }
+    sleepms(100);
+
+    // Read command output_handle
+    status = readString(read);
+    if (status != 0)
+    {
+        cerr << "Unable to read move command output" << endl;
         return -1;
     }
 
+    // Check for out-of-reach error message
+    istringstream iss(read);
+
+    string line;
+    getline(iss, line);
+    while (getline(iss, line))
+    {
+        if (line.compare(0, 26, "ash: Location out of reach") == 0) {
+            cerr << "Location out of reach" << endl;
+            return -2;
+        }
+    }
+
     //Assuming speed of 10, need this delay. If you change your speed, you can change this delay but be very careful
-    sleepms(10000);
+    sleepms(3000);
 }
 
 void serialConnectA255::sleepms(int milliseconds)
@@ -661,13 +688,13 @@ int serialConnectA255::writeString(string str)
         //Check if data write was successfull
         if (countSent < 0)
         {
-            ROS_ERROR("Could not write to the serial port properly.");
+            cerr << "Could not write to the serial port properly." << endl;
             return -1;
         }
     }
     else
     {
-        ROS_ERROR("Could not send the command over serial port. Check if connected.");
+        cerr << "Could not send the command over serial port. Check if connected." << endl;
         return -1;
     }
 
@@ -703,14 +730,14 @@ int serialConnectA255::readString(string &str)
             }
             else
             {
-                ROS_ERROR("Could not receive the response over serial port. Check if connected.");
+                cerr << "Could not receive the response over serial port. Check if connected." << endl;
                 return -1;
             }
         }
     }
     else
     {
-        ROS_ERROR("Could not receive the response over serial port. Check if connected.");
+        cerr << "Could not receive the response over serial port. Check if connected." << endl;
         return -1;
     }
 
@@ -725,7 +752,7 @@ int serialConnectA255::goReady()
     int status = writeString("ready\r");
     if (status != 0)
     {
-        ROS_ERROR("Unable to go to 'ready' position.\n");
+        cerr << "Unable to go to 'ready' position.\n" << endl;
         return -1;
     }
     sleepms(10000);
@@ -746,7 +773,7 @@ int serialConnectA255::goInZ(double desZ)
     int status = writeString(tempZZ);
     if (status != 0)
     {
-        ROS_ERROR("Unable to goInZ");
+        cerr << "Unable to goInZ" << endl;
         return -1;
     }
     sleepms(3000);
@@ -761,7 +788,7 @@ int serialConnectA255::grip_open()
     int status = writeString("grip_open\r");
     if (status != 0)
     {
-        ROS_ERROR("Unable to send 'grip_open'");
+        cerr << "Unable to send 'grip_open'" << endl;
         return -1;
     }
     sleepms(2000);
@@ -773,7 +800,7 @@ int serialConnectA255::grip_close()
     int status = writeString("grip_close\r");
     if (status != 0)
     {
-        ROS_ERROR("Unable to send 'grip_close'");
+        cerr << "Unable to send 'grip_close'" << endl;
         return -1;
     }
     sleepms(2000);
