@@ -6,6 +6,7 @@
 #include "opencv2/opencv.hpp"
 #include "opencv2/nonfree/nonfree.hpp"
 #include <serialConnectA255.h>
+#include <game.h>
 
 using namespace cv;
 
@@ -72,19 +73,22 @@ std::vector<DMatch> filterGoodMatches(std::vector<DMatch> matches)
 
 Point2f computeReferenceImageCoordinatesOfTile(int tile)
 {
+    int imgWidth = 198;
+    int imgHeight = 197;
+
     int tileWidth = 19;
     int offset = 14;
 
-    int col = tile % 10;
-    int row = (tile / 10) + 1;
+    int col = (tile - 1) % 10; // Should return zero for all numbers that are factors of 10
+    int row = ((tile - 1) / 10) + 1; // Should return 1 for all numbers <= 10, 2 for all numbers >10 <=20
 
     if (row % 2 == 0)
     {
-        return Point2f(198 - (offset + (col - 1) * tileWidth), 198 - (offset + (row - 1) * tileWidth));
+        return Point2f(imgWidth - (offset + col * tileWidth), imgHeight - (offset + (row - 1) * tileWidth));
     }
     else
     {
-        return Point2f(offset + (col - 1) * tileWidth, 198 - (offset + (row - 1) * tileWidth));
+        return Point2f(offset + col * tileWidth, imgHeight - (offset + (row - 1) * tileWidth));
     }
 }
 
@@ -110,12 +114,12 @@ Point3f getWorldCoordinates(Point2f pixel)
     e = (pixel.y - img_height / 2) * p_y * (f_i - c) / f_i;
     f = c;
 
-    cout << d << " d, " << e << ", " << f << endl;
+    cout << d << ", " << e << ", " << f << endl;
 
     return Point3f(a - e, b - d, c - f);
 }
 
-void illustrateHomography(Mat img_object, Mat img_matches, Mat H)
+void illustrateHomography(Mat img_object, Mat img_matches, Mat H, int tilenum)
 {
     //-- Get the corners from the image_1 ( the object to be "detected" )
     std::vector<Point2f> obj_corners(5);
@@ -123,7 +127,7 @@ void illustrateHomography(Mat img_object, Mat img_matches, Mat H)
     obj_corners[1] = cvPoint(img_object.cols, 0);
     obj_corners[2] = cvPoint(img_object.cols, img_object.rows);
     obj_corners[3] = cvPoint(0, img_object.rows);
-    obj_corners[4] = computeReferenceImageCoordinatesOfTile(45);
+    obj_corners[4] = computeReferenceImageCoordinatesOfTile(tilenum);
     std::vector<Point2f> scene_corners(5);
 
     perspectiveTransform(obj_corners, scene_corners, H);
@@ -139,7 +143,7 @@ void illustrateHomography(Mat img_object, Mat img_matches, Mat H)
     imshow("view", img_matches);
 }
 
-void imageRecognition(Mat img_object, Mat img_scene, serialConnectA255 &armController)
+Mat computeHomography(Mat img_object, Mat img_scene, int tilenum)
 {
     // Identify keypoints
     std::vector<KeyPoint>
@@ -171,28 +175,9 @@ void imageRecognition(Mat img_object, Mat img_scene, serialConnectA255 &armContr
 
     Mat H = findHomography(obj, scene, CV_RANSAC);
 
-    // Compute world coordinates and move robot to point
-    std::vector<Point2f> ref_pixel(1);
-    ref_pixel[0] = computeReferenceImageCoordinatesOfTile(45);
-
-    std::vector<Point2f> cam_pixel(1);
-    perspectiveTransform(ref_pixel, cam_pixel, H);
-
-    cout << cam_pixel[0].x << ", " << cam_pixel[0].y << endl;
-
-    Point3f wc = getWorldCoordinates(cam_pixel[0]);
-
-    cout << wc.x << ", " << wc.y << ", " << wc.z << endl;
-    double *DesTheta = new double[5];
-    DesTheta = armController.invKine(wc.x, wc.y, wc.z + 300, 45);
-    if (armController.moveTheta(20, DesTheta[0], DesTheta[1], DesTheta[2], DesTheta[3], DesTheta[4]) < 0)
-    {
-        ROS_ERROR("Unable to Run moveTheta");
-        return;
-    }
-
     // Illustrate homography
-    illustrateHomography(img_object, img_matches, H);
+    illustrateHomography(img_object, img_matches, H, tilenum);
+    return H;
 }
 
 int main(int argc, char **argv)
@@ -218,17 +203,20 @@ int main(int argc, char **argv)
         return -1;
     }
 
+    // Initialize game
+    game game;
+    game.tile = 50;
+
     // Prepare callback for performing image recognition
     bool done = false;
     Mat img_object = imread("/home/me-547/Downloads/group7/board_reference_prepped.png", CV_LOAD_IMAGE_UNCHANGED);
-    auto imageCallback = [&done, img_object, &armController](const sensor_msgs::ImageConstPtr &msg) {
+    Mat H;
+    auto imageCallback = [&game, &done, img_object, &armController, &H](const sensor_msgs::ImageConstPtr &msg) {
         if (!done)
         {
-            done = true;
             try
             {
-                imageRecognition(img_object, cv_bridge::toCvShare(msg, "bgr8")->image, armController);
-                // cv::imshow("view", cv_bridge::toCvShare(msg, "bgr8")->image);
+                H = computeHomography(img_object, cv_bridge::toCvShare(msg, "bgr8")->image, game.tile);
                 cv::waitKey(30);
             }
             catch (cv_bridge::Exception &e)
@@ -236,6 +224,53 @@ int main(int argc, char **argv)
                 ROS_ERROR("Could not convert from '%s' to 'bgr8'.", msg->encoding.c_str());
             }
         }
+
+        // Compute world coordinates and move robot to point
+        cout << "========= Moving to tile" << game.tile << endl;
+        std::vector<Point2f> ref_pixel(1);
+        ref_pixel[0] = computeReferenceImageCoordinatesOfTile(game.tile);
+        cout << ref_pixel[0].x << ", " << ref_pixel[0].y << endl;
+
+        std::vector<Point2f> cam_pixel(1);
+        perspectiveTransform(ref_pixel, cam_pixel, H);
+        cout << cam_pixel[0].x << ", " << cam_pixel[0].y << endl;
+
+        Point3f wc = getWorldCoordinates(cam_pixel[0]);
+        cout << wc.x << ", " << wc.y << ", " << wc.z << endl;
+
+        armController.goReady();
+
+        double *DesTheta = new double[5];
+        DesTheta = armController.invKine(wc.x, wc.y, wc.z + 300, 0);
+        // if (armController.moveRobot(wc.x, wc.y, wc.z, 0, 0, 0))
+        if (armController.moveTheta(20, DesTheta[0], DesTheta[1], DesTheta[2], DesTheta[3], DesTheta[4]) < 0)
+        {
+            ROS_ERROR("Unable to Run moveTheta");
+            return;
+        }
+
+        if (game.tile == 1)
+        {
+            if (armController.grip_open() < 0)
+            {
+                ROS_ERROR("Unable to Open Grip");
+                return;
+            }
+        }
+
+        armController.goInZ(-70);
+
+        if (game.tile == 1)
+        {
+            if (armController.grip_close() < 0)
+            {
+                ROS_ERROR("Unable to Close Grip");
+                return;
+            }
+        }
+        armController.goInZ(70);
+
+        game.next();
     };
 
     // Listen for camera messages

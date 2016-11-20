@@ -458,7 +458,7 @@ double *serialConnectA255::invKine(double desX, double desY, double desZ, double
     ROS_INFO("Solving Inverse Kinematics");
 
     //Declare Variables
-    const double pi = 22 / 7;
+    const double pi = 22.0 / 7;
     cout << "Pi Calculation, is IT a INTEGER?!? " << pi << "\n";
     alpha = alpha * pi / 180;
 
@@ -466,20 +466,21 @@ double *serialConnectA255::invKine(double desX, double desY, double desZ, double
     double s = (desZ - 254); // subtract d_1 from the height of the end-effector
     double A2 = 254.0;
     double A3 = 254.0;
-    double F = (pow(desX, 2) + pow(desY, 2) + pow(s, 2) - pow(A2, 2) - pow(A3, 2)) / (2 * A2 * A3); // cos(theta_3).
+    double F = (pow(desX, 2) + pow(desY, 2) + pow(s, 2) - pow(A2, 2) - pow(A3, 2)) / (2 * A2 * A3); // cos(theta_3)
+    cout << "F" << F << endl;
 
     //double F = 1;
-
-    sleepms(200);
-
     double theta_1 = atan2(desY, desX);                  // There is no offset "d".
     double theta_3 = atan2(-1 * sqrt(1 - pow(F, 2)), F); // theta_3 with respect to theLink 2 frame.
+
+    cout << "theta3, " << atan2(-1 * sqrt(1 - pow(F, 2)), F) << endl;
+
     double theta_2 = atan2(s, r) - atan2(A3 * sin(theta_3), A2 + A3 * cos(theta_3));
-    sleepms(200);
+
+    cout << "theta2 components, " << atan2(s, r) << ", " << atan2(A3 * sin(theta_3), A2 + A3 * cos(theta_3)) << endl;
 
     double theta_4 = -theta_3 - theta_2 - pi / 2;
     double theta_5 = alpha; //theta_1-alpha-pi/2 ;
-    sleepms(200);
 
     double *invK = new double[5];
 
